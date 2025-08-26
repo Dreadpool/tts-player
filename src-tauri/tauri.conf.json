@@ -1,0 +1,62 @@
+{
+  "productName": "TTS Player",
+  "version": "0.1.0",
+  "identifier": "com.bradyprice.tts-player",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "fullscreen": false,
+        "resizable": true,
+        "title": "TTS Player",
+        "width": 400,
+        "height": 300,
+        "minWidth": 400,
+        "minHeight": 300,
+        "focus": true,
+        "alwaysOnTop": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Utility",
+    "copyright": "",
+    "shortDescription": "Text-to-Speech audio player",
+    "longDescription": "A lightweight TTS player with ElevenLabs integration for Raycast"
+  },
+  "plugins": {
+    "cli": {
+      "description": "TTS Player CLI",
+      "args": [
+        {
+          "name": "text",
+          "description": "Text to convert to speech",
+          "short": "t",
+          "takesValue": true
+        },
+        {
+          "name": "voice",
+          "description": "Voice ID to use",
+          "short": "v",
+          "takesValue": true
+        },
+        {
+          "name": "file",
+          "description": "File path to read text from",
+          "short": "f",
+          "takesValue": true
+        }
+      ]
+    }
+  }
+}
