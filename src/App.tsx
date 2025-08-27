@@ -14,7 +14,7 @@ interface CliMatches {
 
 function App() {
   const [initialText, setInitialText] = useState<string>('');
-  const [initialVoice, setInitialVoice] = useState<string>('onwK4e9ZLuTAKqWW03F9');
+  const [initialVoice, setInitialVoice] = useState<string>('nova');
 
   useEffect(() => {
     const loadInitialText = async () => {

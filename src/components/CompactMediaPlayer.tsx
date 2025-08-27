@@ -1,14 +1,14 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Play, Pause } from 'lucide-react';
 
 interface CompactMediaPlayerProps {
   audioSrc: string;
-  text: string;
   autoplay?: boolean;
 }
 
-export function CompactMediaPlayer({ audioSrc, text, autoplay = false }: CompactMediaPlayerProps) {
+export function CompactMediaPlayer({ audioSrc, autoplay = false }: CompactMediaPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  const autoplayAttemptedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -29,26 +29,43 @@ export function CompactMediaPlayer({ audioSrc, text, autoplay = false }: Compact
     audio.addEventListener('play', handlePlay);
     audio.addEventListener('pause', handlePause);
 
-    // Autoplay handling
-    let hasAutoplayed = false;
-    const handleCanPlay = async () => {
-      if (autoplay && !hasAutoplayed) {
-        hasAutoplayed = true;
-        setTimeout(async () => {
-          try {
+    // Robust autoplay handling - Multiple attempts with different events
+    const attemptAutoplay = async () => {
+      if (!autoplay || autoplayAttemptedRef.current) return;
+      autoplayAttemptedRef.current = true;
+      
+      // Multiple attempts with increasing delays
+      const attempts = [50, 200, 500, 1000];
+      
+      for (const delay of attempts) {
+        // Check if component is still mounted and audio is still the same
+        if (!audioRef.current || audioRef.current.src !== audio.src) {
+          return;
+        }
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        try {
+          if (audio.readyState >= 3) { // HAVE_FUTURE_DATA or better
             await audio.play();
             setIsPlaying(true);
-          } catch (error) {
-            console.error('Error autoplaying audio:', error);
-            setIsPlaying(false);
+            console.log(`Autoplay succeeded after ${delay}ms delay`);
+            return;
           }
-        }, 100);
+        } catch (error) {
+          console.log(`Autoplay attempt failed at ${delay}ms:`, error instanceof Error ? error.message : String(error));
+        }
       }
+      
+      console.log('All autoplay attempts failed - user interaction may be required');
     };
 
-    audio.addEventListener('canplaythrough', handleCanPlay);
+    // Try autoplay on multiple events
+    audio.addEventListener('canplaythrough', attemptAutoplay);
+    audio.addEventListener('loadeddata', attemptAutoplay);
 
     // Reset states when audio source changes
+    autoplayAttemptedRef.current = false;
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
@@ -59,7 +76,8 @@ export function CompactMediaPlayer({ audioSrc, text, autoplay = false }: Compact
       audio.removeEventListener('ended', handleEnded);
       audio.removeEventListener('play', handlePlay);
       audio.removeEventListener('pause', handlePause);
-      audio.removeEventListener('canplaythrough', handleCanPlay);
+      audio.removeEventListener('canplaythrough', attemptAutoplay);
+      audio.removeEventListener('loadeddata', attemptAutoplay);
     };
   }, [audioSrc, autoplay]);
 
@@ -101,7 +119,7 @@ export function CompactMediaPlayer({ audioSrc, text, autoplay = false }: Compact
   const progressPercentage = duration ? (currentTime / duration) * 100 : 0;
 
   return (
-    <div className="bg-bg-secondary rounded-3xl p-6">
+    <div className="bg-bg-secondary rounded-3xl p-6 w-fit">
       <audio ref={audioRef} src={audioSrc} preload="metadata" />
       
       {/* Compact Media Controls */}
@@ -124,12 +142,9 @@ export function CompactMediaPlayer({ audioSrc, text, autoplay = false }: Compact
           )}
         </button>
 
-        {/* Progress Area - Takes remaining space */}
-        <div className="flex-1 space-y-2">
-          {/* Text Preview */}
-          <div className="text-sm text-text-secondary font-medium leading-relaxed truncate">
-            {text.length > 80 ? `${text.substring(0, 80)}...` : text}
-          </div>
+        {/* Progress Area - Fixed width for consistent sizing */}
+        <div className="w-48">
+          {/* NO TEXT - Pure audio controls only */}
           
           {/* Integrated Progress Bar */}
           <div 

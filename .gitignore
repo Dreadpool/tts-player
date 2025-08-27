@@ -41,6 +41,15 @@ test-results/
 # Tauri specific
 src-tauri/bundle/
 src-tauri/gen/
+*.dmg
+*.pkg
+*.deb
+*.rpm
+*.AppImage
+
+# Cache directories
+.vite/
+.parcel-cache/
 
 # Lock files (keep package-lock.json but ignore others)
 pnpm-lock.yaml

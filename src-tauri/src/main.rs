@@ -11,10 +11,10 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[tauri::command]
 async fn generate_speech(text: String, voice_id: String) -> Result<String, String> {
-    let api_key = std::env::var("ELEVENLABS_API_KEY")
-        .unwrap_or_else(|_| "sk_dd047612fa416299fd23f9213ed48958bd292a8a61591479".to_string());
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OPENAI_API_KEY environment variable not set".to_string())?;
     
-    let tts_service = tts::TTSService::with_database(&api_key, "https://api.elevenlabs.io")
+    let tts_service = tts::TTSService::with_database(&api_key, "https://api.openai.com")
         .await
         .map_err(|e| e.to_string())?;
     
@@ -36,11 +36,40 @@ async fn generate_speech(text: String, voice_id: String) -> Result<String, Strin
 }
 
 #[tauri::command]
-async fn get_user_info() -> Result<database::UserInfo, String> {
-    let api_key = std::env::var("ELEVENLABS_API_KEY")
-        .unwrap_or_else(|_| "sk_dd047612fa416299fd23f9213ed48958bd292a8a61591479".to_string());
+async fn generate_speech_with_model(text: String, voice_id: String, model: String) -> Result<String, String> {
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OPENAI_API_KEY environment variable not set".to_string())?;
     
-    let tts_service = tts::TTSService::with_database(&api_key, "https://api.elevenlabs.io")
+    let tts_service = tts::TTSService::with_database(&api_key, "https://api.openai.com")
+        .await
+        .map_err(|e| e.to_string())?;
+    
+    // Validate inputs
+    tts_service.validate_text(&text).await?;
+    if !tts_service.is_valid_voice(&voice_id) {
+        return Err(format!("Invalid voice ID: {}", voice_id));
+    }
+    
+    // Generate speech with specific model
+    let audio_data = tts_service.generate_speech_with_model(&text, &voice_id, &model).await?;
+    
+    // Track usage
+    let _ = tts_service.track_usage(&text, &voice_id, &model, true, None).await;
+    
+    // Convert audio data to base64 data URL that the HTML audio player can use directly
+    use base64::{Engine, engine::general_purpose};
+    let base64_audio = general_purpose::STANDARD.encode(&audio_data);
+    let data_url = format!("data:audio/mpeg;base64,{}", base64_audio);
+    
+    Ok(data_url)
+}
+
+#[tauri::command]
+async fn get_user_info() -> Result<database::UserInfo, String> {
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OPENAI_API_KEY environment variable not set".to_string())?;
+    
+    let tts_service = tts::TTSService::with_database(&api_key, "https://api.openai.com")
         .await
         .map_err(|e| e.to_string())?;
     
@@ -49,10 +78,10 @@ async fn get_user_info() -> Result<database::UserInfo, String> {
 
 #[tauri::command]
 async fn get_usage_stats(days: i32) -> Result<database::UsageStats, String> {
-    let api_key = std::env::var("ELEVENLABS_API_KEY")
-        .unwrap_or_else(|_| "sk_dd047612fa416299fd23f9213ed48958bd292a8a61591479".to_string());
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OPENAI_API_KEY environment variable not set".to_string())?;
     
-    let tts_service = tts::TTSService::with_database(&api_key, "https://api.elevenlabs.io")
+    let tts_service = tts::TTSService::with_database(&api_key, "https://api.openai.com")
         .await
         .map_err(|e| e.to_string())?;
     
@@ -61,10 +90,10 @@ async fn get_usage_stats(days: i32) -> Result<database::UsageStats, String> {
 
 #[tauri::command]
 async fn get_usage_history(limit: i32, days: Option<i32>) -> Result<Vec<database::UsageRecord>, String> {
-    let api_key = std::env::var("ELEVENLABS_API_KEY")
-        .unwrap_or_else(|_| "sk_dd047612fa416299fd23f9213ed48958bd292a8a61591479".to_string());
+    let api_key = std::env::var("OPENAI_API_KEY")
+        .map_err(|_| "OPENAI_API_KEY environment variable not set".to_string())?;
     
-    let tts_service = tts::TTSService::with_database(&api_key, "https://api.elevenlabs.io")
+    let tts_service = tts::TTSService::with_database(&api_key, "https://api.openai.com")
         .await
         .map_err(|e| e.to_string())?;
     
@@ -88,9 +117,23 @@ async fn read_clipboard(app_handle: tauri::AppHandle) -> Result<String, String> 
 #[tauri::command]
 async fn read_text_file(file_path: String) -> Result<String, String> {
     use std::fs;
+    use std::path::Path;
     
-    // Only allow reading from temp directory for security
-    if !file_path.starts_with("/tmp/") && !file_path.starts_with(&std::env::temp_dir().display().to_string()) {
+    // Secure path validation using canonical paths to prevent path traversal
+    let temp_dir = std::env::temp_dir();
+    let temp_dir_canonical = match temp_dir.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Err("Unable to determine temp directory".to_string()),
+    };
+    
+    let file_path_buf = Path::new(&file_path);
+    let file_path_canonical = match file_path_buf.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Err("Invalid file path".to_string()),
+    };
+    
+    // Ensure the canonical path is within the temp directory
+    if !file_path_canonical.starts_with(&temp_dir_canonical) {
         return Err("Access denied: can only read from temporary directory".to_string());
     }
     
@@ -111,6 +154,7 @@ async fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             generate_speech,
+            generate_speech_with_model,
             get_user_info,
             get_usage_stats,
             get_usage_history,

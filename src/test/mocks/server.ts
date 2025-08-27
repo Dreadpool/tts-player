@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw';
 
 export const handlers = [
   // Mock ElevenLabs TTS API
-  http.post('https://api.elevenlabs.io/v1/text-to-speech/:voiceId', async ({ request, params }) => {
+  http.post('https://api.elevenlabs.io/v1/text-to-speech/:voiceId', async ({ request }) => {
     const apiKey = request.headers.get('xi-api-key');
     
     if (!apiKey) {

@@ -84,29 +84,84 @@ impl TTSService {
             return Err(TTSError::ValidationError("Text cannot be empty".to_string()));
         }
         
-        if text.len() > 5000 {
-            return Err(TTSError::ValidationError("Text too long (max 5000 characters)".to_string()));
+        if text.len() > 4096 {
+            return Err(TTSError::ValidationError("Text too long (max 4096 characters)".to_string()));
         }
         
         Ok(())
     }
 
     pub fn is_valid_voice(&self, voice_id: &str) -> bool {
-        // Accept any non-empty voice ID since ElevenLabs has many voices with complex IDs
-        !voice_id.trim().is_empty()
+        // List of OpenAI TTS voice IDs
+        const VALID_VOICE_IDS: &[&str] = &[
+            "alloy",   // Neutral, versatile
+            "echo",    // Male voice
+            "fable",   // British accent
+            "onyx",    // Deep male voice
+            "nova",    // Natural female voice
+            "shimmer", // Expressive female
+        ];
+        
+        let voice_id = voice_id.trim();
+        !voice_id.is_empty() && VALID_VOICE_IDS.contains(&voice_id)
     }
 
     pub async fn generate_speech(&self, text: &str, voice_id: &str) -> Result<Vec<u8>, TTSError> {
-        let url = format!("{}/v1/text-to-speech/{}", self.base_url, voice_id);
+        let url = format!("{}/v1/audio/speech", self.base_url);
         
         let request_body = json!({
-            "text": text,
-            "model_id": "eleven_multilingual_v2"
+            "model": "tts-1-hd",
+            "input": text,
+            "voice": voice_id,
+            "response_format": "mp3"
         });
 
         let response = self.client
             .post(&url)
-            .header("xi-api-key", &self.api_key)
+            .header("Authorization", &format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| TTSError::NetworkError(e.to_string()))?;
+
+        match response.status() {
+            reqwest::StatusCode::OK => {
+                let audio_data = response.bytes().await
+                    .map_err(|e| TTSError::NetworkError(e.to_string()))?;
+                Ok(audio_data.to_vec())
+            }
+            reqwest::StatusCode::UNAUTHORIZED => {
+                let error_text = response.text().await.unwrap_or_default();
+                Err(TTSError::Authentication(error_text))
+            }
+            reqwest::StatusCode::TOO_MANY_REQUESTS => {
+                let retry_after = response.headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse().ok());
+                Err(TTSError::RateLimit(retry_after))
+            }
+            status => {
+                let error_text = response.text().await.unwrap_or_default();
+                Err(TTSError::UnknownError(format!("HTTP {}: {}", status, error_text)))
+            }
+        }
+    }
+
+    pub async fn generate_speech_with_model(&self, text: &str, voice_id: &str, model: &str) -> Result<Vec<u8>, TTSError> {
+        let url = format!("{}/v1/audio/speech", self.base_url);
+        
+        let request_body = json!({
+            "model": model,
+            "input": text,
+            "voice": voice_id,
+            "response_format": "mp3"
+        });
+
+        let response = self.client
+            .post(&url)
+            .header("Authorization", &format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&request_body)
             .send()
@@ -159,56 +214,32 @@ impl TTSService {
     }
 
     pub async fn get_user_info(&self) -> Result<UserInfo, TTSError> {
-        // Check cached info first (if less than 5 minutes old)
+        // OpenAI TTS is pay-per-use, no subscription tiers or limits
+        // Get local usage data from database instead
+        let character_used = if let Some(db) = &self.database {
+            match db.get_usage_stats(30).await { // Get last 30 days
+                Ok(stats) => stats.total_characters,
+                Err(_) => 0,
+            }
+        } else {
+            0
+        };
+
+        let user_info = UserInfo {
+            subscription_tier: "Pay-per-use".to_string(),
+            character_limit: -1, // Unlimited
+            character_used: character_used as i32,
+            characters_remaining: -1, // Unlimited
+            reset_date: Utc::now(), // Not applicable for pay-per-use
+            last_updated: Utc::now(),
+        };
+
+        // Cache the user info
         if let Some(db) = &self.database {
-            if let Ok(Some(cached_info)) = db.get_cached_user_info().await {
-                let age = Utc::now().signed_duration_since(cached_info.last_updated);
-                if age.num_minutes() < 5 {
-                    return Ok(cached_info);
-                }
-            }
+            let _ = db.cache_user_info(&user_info).await;
         }
 
-        // Fetch fresh user info from API
-        let url = format!("{}/v1/user", self.base_url);
-        
-        let response = self.client
-            .get(&url)
-            .header("xi-api-key", &self.api_key)
-            .send()
-            .await
-            .map_err(|e| TTSError::NetworkError(e.to_string()))?;
-
-        match response.status() {
-            reqwest::StatusCode::OK => {
-                let user_data: Value = response.json().await
-                    .map_err(|e| TTSError::NetworkError(e.to_string()))?;
-                
-                let user_info = UserInfo {
-                    subscription_tier: user_data["subscription"]["tier"].as_str().unwrap_or("unknown").to_string(),
-                    character_limit: user_data["subscription"]["character_limit"].as_i64().unwrap_or(0) as i32,
-                    character_used: user_data["subscription"]["character_count"].as_i64().unwrap_or(0) as i32,
-                    characters_remaining: user_data["subscription"]["character_limit"].as_i64().unwrap_or(0) as i32 
-                        - user_data["subscription"]["character_count"].as_i64().unwrap_or(0) as i32,
-                    reset_date: Utc::now(), // This would need to be parsed from the API response
-                    last_updated: Utc::now(),
-                };
-
-                // Cache the user info
-                if let Some(db) = &self.database {
-                    let _ = db.cache_user_info(&user_info).await;
-                }
-
-                Ok(user_info)
-            }
-            reqwest::StatusCode::UNAUTHORIZED => {
-                Err(TTSError::Authentication("Invalid API key".to_string()))
-            }
-            status => {
-                let error_text = response.text().await.unwrap_or_default();
-                Err(TTSError::UnknownError(format!("HTTP {}: {}", status, error_text)))
-            }
-        }
+        Ok(user_info)
     }
 
     pub async fn track_usage(&self, text: &str, voice_id: &str, model_id: &str, success: bool, error_message: Option<String>) -> Result<(), TTSError> {
@@ -236,7 +267,7 @@ impl TTSService {
     }
 
     pub async fn generate_speech_tracked(&self, text: &str, voice_id: &str) -> Result<Vec<u8>, TTSError> {
-        let model_id = "eleven_multilingual_v2";
+        let model_id = "tts-1-hd"; // OpenAI high-quality model
         let start_time = Utc::now();
         
         match self.generate_speech(text, voice_id).await {
@@ -276,14 +307,12 @@ impl TTSService {
         text.len() as i32
     }
 
-    pub fn estimate_usage_cost(&self, character_count: i32, subscription_tier: &str) -> f64 {
-        // Rough cost estimation based on ElevenLabs pricing
-        match subscription_tier {
-            "starter" => 0.0, // Free tier
-            "creator" => character_count as f64 * 0.00003, // $0.30 per 10K chars
-            "pro" => character_count as f64 * 0.00003,
-            "scale" => character_count as f64 * 0.00002, // Volume discount
-            _ => 0.0,
+    pub fn estimate_usage_cost(&self, character_count: i32, model: &str) -> f64 {
+        // OpenAI TTS pricing (pay-per-use)
+        match model {
+            "tts-1" => character_count as f64 * 0.000015,    // $15 per 1M characters
+            "tts-1-hd" => character_count as f64 * 0.00003,  // $30 per 1M characters
+            _ => character_count as f64 * 0.00003, // Default to HD pricing
         }
     }
 }

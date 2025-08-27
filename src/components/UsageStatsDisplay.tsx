@@ -61,15 +61,19 @@ export function UsageStatsDisplay({ isVisible, onClose }: UsageStatsDisplayProps
   };
 
   const getUsagePercentage = () => {
-    if (!userInfo || userInfo.character_limit === 0) return 0;
+    // For pay-per-use, no limits - return 0 to hide progress bar
+    if (!userInfo || userInfo.character_limit === -1) return 0;
     return (userInfo.character_used / userInfo.character_limit) * 100;
   };
 
   const getUsageColor = () => {
-    const percentage = getUsagePercentage();
-    if (percentage >= 90) return 'bg-red-500';
-    if (percentage >= 75) return 'bg-yellow-500';
-    return 'bg-green-500';
+    return 'bg-blue-500'; // Always blue for pay-per-use
+  };
+
+  const estimatedCost = () => {
+    if (!userInfo) return 0;
+    // OpenAI TTS HD pricing: $30 per 1M characters
+    return (userInfo.character_used / 1000000) * 30;
   };
 
   if (!isVisible) return null;
@@ -116,23 +120,21 @@ export function UsageStatsDisplay({ isVisible, onClose }: UsageStatsDisplayProps
               <div className="bg-gray-50 rounded-lg p-4">
                 <h3 className="text-lg font-semibold text-gray-800 mb-3 flex items-center">
                   <Zap size={20} className="mr-2" />
-                  Subscription: {userInfo.subscription_tier.charAt(0).toUpperCase() + userInfo.subscription_tier.slice(1)}
+                  {userInfo.subscription_tier}
                 </h3>
                 
                 <div className="space-y-4">
                   <div>
-                    <div className="flex justify-between text-sm text-gray-600 mb-1">
-                      <span>Characters Used</span>
-                      <span>{userInfo.character_used.toLocaleString()} / {userInfo.character_limit.toLocaleString()}</span>
+                    <div className="flex justify-between text-sm text-gray-600 mb-2">
+                      <span>Characters Used (30 days)</span>
+                      <span>{userInfo.character_used.toLocaleString()}</span>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-3">
-                      <div
-                        className={`h-3 rounded-full transition-all duration-300 ${getUsageColor()}`}
-                        style={{ width: `${Math.min(getUsagePercentage(), 100)}%` }}
-                      ></div>
+                    <div className="flex justify-between text-sm text-gray-600">
+                      <span>Estimated Cost</span>
+                      <span className="font-semibold">${estimatedCost().toFixed(4)}</span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-1">
-                      {userInfo.characters_remaining.toLocaleString()} characters remaining
+                    <p className="text-xs text-gray-500 mt-2">
+                      Based on OpenAI TTS HD pricing ($30 per 1M characters)
                     </p>
                   </div>
                 </div>
@@ -201,7 +203,7 @@ export function UsageStatsDisplay({ isVisible, onClose }: UsageStatsDisplayProps
                     Recent Activity (Last 7 Days)
                   </h3>
                   <div className="space-y-2">
-                    {usageStats.daily_usage.slice(0, 7).map((day, index) => (
+                    {usageStats.daily_usage.slice(0, 7).map((day) => (
                       <div key={day.date} className="flex items-center justify-between p-3 bg-gray-50 rounded">
                         <div className="flex items-center space-x-3">
                           <div className="w-2 h-2 bg-blue-500 rounded-full"></div>

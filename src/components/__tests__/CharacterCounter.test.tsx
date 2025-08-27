@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { CharacterCounter } from '../CharacterCounter';
-import { server } from '../../test/mocks/server';
-import { http, HttpResponse } from 'msw';
 
 // Mock Tauri invoke
 vi.mock('@tauri-apps/api/core', () => ({

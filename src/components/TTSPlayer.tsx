@@ -1,15 +1,54 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { CompactMediaPlayer } from './CompactMediaPlayer';
 import { CharacterCounter } from './CharacterCounter';
 import { UsageStatsDisplay } from './UsageStatsDisplay';
+
+interface TTSError {
+  type: 'auth' | 'rate_limit' | 'network' | 'unknown';
+  message: string;
+  retryAfter?: number;
+}
+
+function parseError(error: unknown): TTSError {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  
+  if (errorMessage.includes('401') || errorMessage.includes('API key')) {
+    return {
+      type: 'auth',
+      message: 'Authentication failed. Please check your API key.'
+    };
+  }
+  
+  if (errorMessage.includes('429') || errorMessage.includes('rate limit')) {
+    const retryMatch = errorMessage.match(/retry.*?(\d+)/i);
+    const seconds = retryMatch ? parseInt(retryMatch[1], 10) : 60;
+    return {
+      type: 'rate_limit',
+      message: `Rate limit reached. Try again in ${seconds} seconds.`,
+      retryAfter: seconds
+    };
+  }
+  
+  if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+    return {
+      type: 'network',
+      message: 'Network error. Please check your internet connection.'
+    };
+  }
+  
+  return {
+    type: 'unknown',
+    message: errorMessage
+  };
+}
 
 interface TTSPlayerProps {
   initialText?: string;
   initialVoice?: string;
 }
 
-export function TTSPlayer({ initialText = '', initialVoice = 'onwK4e9ZLuTAKqWW03F9' }: TTSPlayerProps) {
+export function TTSPlayer({ initialText = '', initialVoice = 'nova' }: TTSPlayerProps) {
   const [text, setText] = useState(initialText);
   const [voice, setVoice] = useState(initialVoice);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -18,6 +57,18 @@ export function TTSPlayer({ initialText = '', initialVoice = 'onwK4e9ZLuTAKqWW03
   const [showUsageStats, setShowUsageStats] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [shouldAutoplay, setShouldAutoplay] = useState(false);
+  const [showVoiceSelector, setShowVoiceSelector] = useState(false);
+
+  const availableVoices = [
+    { id: 'nova', name: 'Nova', description: 'Natural female voice' },
+    { id: 'shimmer', name: 'Shimmer', description: 'Expressive female' },
+    { id: 'alloy', name: 'Alloy', description: 'Neutral, versatile' },
+    { id: 'echo', name: 'Echo', description: 'Male voice' },
+    { id: 'fable', name: 'Fable', description: 'British accent' },
+    { id: 'onyx', name: 'Onyx', description: 'Deep male voice' },
+  ];
+
+  const currentVoiceName = availableVoices.find(v => v.id === voice)?.name || 'Nova';
 
   useEffect(() => {
     setText(initialText);
@@ -26,14 +77,14 @@ export function TTSPlayer({ initialText = '', initialVoice = 'onwK4e9ZLuTAKqWW03
       // Call the generation function directly with the initial text
       generateSpeechAuto(initialText.trim(), voice);
     }
-  }, [initialText]);
+  }, [initialText, voice]);
 
   useEffect(() => {
     setVoice(initialVoice);
   }, [initialVoice]);
 
   // Separate function for auto-generation
-  const generateSpeechAuto = async (textToSpeak: string, voiceId: string) => {
+  const generateSpeechAuto = useCallback(async (textToSpeak: string, voiceId: string) => {
     setIsGenerating(true);
     setError('');
     setShouldAutoplay(true); // Enable autoplay for auto-generated speech
@@ -45,22 +96,14 @@ export function TTSPlayer({ initialText = '', initialVoice = 'onwK4e9ZLuTAKqWW03
       });
       
       setAudioSrc(audioPath);
+      // Keep text for manual editing/regeneration instead of nuclear clear
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      
-      if (errorMessage.includes('401') || errorMessage.includes('API key')) {
-        setError('Authentication failed. Please check your API key.');
-      } else if (errorMessage.includes('429')) {
-        const retryMatch = errorMessage.match(/retry.*?(\d+)/i);
-        const seconds = retryMatch ? retryMatch[1] : '60';
-        setError(`Rate limit reached. Try again in ${seconds} seconds.`);
-      } else {
-        setError(errorMessage);
-      }
+      const parsedError = parseError(err);
+      setError(parsedError.message);
     } finally {
       setIsGenerating(false);
     }
-  };
+  }, []);
 
   const handleGenerate = async () => {
     if (!text.trim()) return;
@@ -76,18 +119,10 @@ export function TTSPlayer({ initialText = '', initialVoice = 'onwK4e9ZLuTAKqWW03
       });
       
       setAudioSrc(audioPath);
+      // Keep text for manual editing/regeneration instead of nuclear clear
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      
-      if (errorMessage.includes('401') || errorMessage.includes('API key')) {
-        setError('Authentication failed. Please check your API key.');
-      } else if (errorMessage.includes('429')) {
-        const retryMatch = errorMessage.match(/retry.*?(\d+)/i);
-        const seconds = retryMatch ? retryMatch[1] : '60';
-        setError(`Rate limit reached. Try again in ${seconds} seconds.`);
-      } else {
-        setError(errorMessage);
-      }
+      const parsedError = parseError(err);
+      setError(parsedError.message);
     } finally {
       setIsGenerating(false);
     }
@@ -115,40 +150,35 @@ export function TTSPlayer({ initialText = '', initialVoice = 'onwK4e9ZLuTAKqWW03
       {/* Header - Essential content (80% visual priority) */}
       <header className="text-center mb-8">
         <h1 className="text-3xl font-light text-text-primary tracking-tight leading-tight">
-          Speak
+          read to me
         </h1>
       </header>
 
-      {/* Primary Content Area - Morphs between text input and media player */}
-      <div className="relative">
-        {audioSrc ? (
-          /* Media Player State - Replaces text input */
-          <div className="animate-fade-in">
-            <CompactMediaPlayer 
-              audioSrc={audioSrc} 
-              text={text}
-              autoplay={shouldAutoplay} 
-            />
-          </div>
-        ) : (
-          /* Text Input State */
-          <div className={`
-            relative bg-bg-secondary rounded-3xl transition-all duration-[250ms] ease-out
-            ${isFocused ? 'ring-1 ring-accent/30 bg-bg-primary shadow-xl shadow-gray-200/50' : ''}
-          `}>
-            {/* Floating Label - Refined typography */}
-            <label 
-              htmlFor="text-input" 
-              className={`
-                absolute left-6 transition-all duration-[250ms] ease-out pointer-events-none
-                ${text || isFocused 
-                  ? 'top-4 text-xs text-text-tertiary font-medium tracking-wide' 
-                  : 'top-6 text-base text-text-secondary'}
-              `}
-            >
-              What would you like me to say?
-            </label>
-            
+      {/* Audio Player - Always at top when available */}
+      {audioSrc && (
+        <div className="mb-6 animate-fade-in">
+          <CompactMediaPlayer 
+            audioSrc={audioSrc} 
+            autoplay={shouldAutoplay} 
+          />
+        </div>
+      )}
+
+      {/* Text Input - Always visible */}
+      <div className="space-y-4">
+        {/* Conditional label - only show when empty */}
+        {!text && (
+          <label htmlFor="text-input" className="text-sm text-text-secondary font-medium transition-opacity duration-200">
+            What would you like me to say?
+          </label>
+        )}
+        
+        {/* Text Input Container - Clean scrollable area */}
+        <div className={`
+          bg-bg-secondary rounded-3xl transition-all duration-[250ms] ease-out overflow-hidden
+          ${isFocused ? 'ring-1 ring-accent/30 bg-bg-primary shadow-xl shadow-gray-200/50' : ''}
+        `}>
+          <div className="max-h-48 overflow-y-auto overflow-x-hidden">
             <textarea
               id="text-input"
               value={text}
@@ -156,21 +186,57 @@ export function TTSPlayer({ initialText = '', initialVoice = 'onwK4e9ZLuTAKqWW03
               onFocus={() => setIsFocused(true)}
               onBlur={() => setIsFocused(false)}
               className={`
-                w-full bg-transparent px-6 py-6 pt-10 rounded-3xl
+                w-full bg-transparent px-6 py-6 pb-8 rounded-t-3xl
                 resize-none outline-none text-text-primary text-base
-                placeholder-transparent transition-all duration-[250ms] ease-out
-                leading-relaxed
-                ${isFocused ? 'min-h-[10rem]' : 'min-h-[8rem]'}
+                transition-all duration-[250ms] ease-out
+                leading-relaxed min-h-[8rem]
               `}
-              placeholder="Enter text..."
+              placeholder="Enter your text here..."
             />
-            
-            {/* Character Counter - Secondary info (15% priority) */}
-            <div className="absolute bottom-4 right-6">
-              <CharacterCounter text={text} minimal={true} />
-            </div>
           </div>
-        )}
+        </div>
+        
+        {/* Voice Selector - Completely separate */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="relative">
+              <button
+                onClick={() => setShowVoiceSelector(!showVoiceSelector)}
+                className="flex items-center gap-2 px-3 py-1.5 text-sm text-text-tertiary hover:text-text-secondary transition-colors rounded-lg hover:bg-gray-50"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+                <span>{currentVoiceName}</span>
+                <svg className={`w-3 h-3 transition-transform ${showVoiceSelector ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              
+              {showVoiceSelector && (
+                <div className="absolute bottom-full left-0 mb-2 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10 min-w-48">
+                  {availableVoices.map((voiceOption) => (
+                    <button
+                      key={voiceOption.id}
+                      onClick={() => {
+                        setVoice(voiceOption.id);
+                        setShowVoiceSelector(false);
+                      }}
+                      className={`w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors ${
+                        voice === voiceOption.id ? 'bg-accent/10 text-accent' : 'text-text-primary'
+                      }`}
+                    >
+                      <div className="font-medium text-sm">{voiceOption.name}</div>
+                      <div className="text-xs text-text-tertiary mt-0.5">{voiceOption.description}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <CharacterCounter text={text} minimal={true} />
+          </div>
+        </div>
       </div>
 
       {/* Error Message - System feedback */}
@@ -184,23 +250,7 @@ export function TTSPlayer({ initialText = '', initialVoice = 'onwK4e9ZLuTAKqWW03
 
       {/* Primary Action Button - Always in same location (Essential interaction) */}
       <div className="flex justify-center pt-2">
-        {audioSrc ? (
-          /* Clear & Start New Button */
-          <button
-            onClick={() => {
-              setAudioSrc('');
-              setText('');
-              setShouldAutoplay(false);
-            }}
-            className="min-h-[44px] px-8 py-3 rounded-full font-medium
-                       bg-gray-100 text-text-primary hover:bg-gray-200 
-                       transition-all duration-[250ms] cubic-bezier(0.25, 0.46, 0.45, 0.94)
-                       transform-gpu tracking-wide hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <span className="text-base">Clear & Start New</span>
-          </button>
-        ) : (
-          /* Generate Speech Button */
+        {/* Generate Speech Button - Always available when text exists */}
           <button
             onClick={handleGenerate}
             disabled={isGenerateDisabled}
@@ -227,7 +277,6 @@ export function TTSPlayer({ initialText = '', initialVoice = 'onwK4e9ZLuTAKqWW03
               )}
             </span>
           </button>
-        )}
       </div>
 
       {/* Usage Stats - Subtle indicator */}
