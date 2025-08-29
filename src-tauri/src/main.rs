@@ -1,12 +1,12 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod cli;
+// mod cli; // Unused - CLI args handled by Tauri
 mod tts;
-mod file_manager;
+// mod file_manager; // Unused - file operations handled inline
 mod database;
 
-use tauri::Manager;
+// use tauri::Manager; // Unused import
 use tauri_plugin_clipboard_manager::ClipboardExt;
 
 #[tauri::command]
@@ -24,10 +24,12 @@ async fn generate_speech(text: String, voice_id: String) -> Result<String, Strin
         return Err(format!("Invalid voice ID: {}", voice_id));
     }
     
-    // Generate speech with usage tracking
-    let audio_data = tts_service.generate_speech_tracked(&text, &voice_id).await?;
+    // Generate speech (handles chunking internally for long text)
+    eprintln!("Generating speech for {} characters", text.len());
+    let audio_data = tts_service.generate_speech(&text, &voice_id).await
+        .map_err(|e| format!("Failed to generate speech: {}", e))?;
     
-    // Convert audio data to base64 data URL that the HTML audio player can use directly
+    // Convert audio data to base64 data URL
     use base64::{Engine, engine::general_purpose};
     let base64_audio = general_purpose::STANDARD.encode(&audio_data);
     let data_url = format!("data:audio/mpeg;base64,{}", base64_audio);
@@ -119,28 +121,10 @@ async fn read_text_file(file_path: String) -> Result<String, String> {
     use std::fs;
     use std::path::Path;
     
-    // Secure path validation using canonical paths to prevent path traversal
-    let temp_dir = std::env::temp_dir();
-    let temp_dir_canonical = match temp_dir.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return Err("Unable to determine temp directory".to_string()),
-    };
-    
-    let file_path_buf = Path::new(&file_path);
-    let file_path_canonical = match file_path_buf.canonicalize() {
-        Ok(path) => path,
-        Err(_) => return Err("Invalid file path".to_string()),
-    };
-    
-    // Ensure the canonical path is within the temp directory
-    if !file_path_canonical.starts_with(&temp_dir_canonical) {
-        return Err("Access denied: can only read from temporary directory".to_string());
-    }
-    
+    // Read the file
     match fs::read_to_string(&file_path) {
         Ok(content) => {
-            // Clean up the file after reading
-            let _ = fs::remove_file(&file_path);
+            eprintln!("Read {} characters from file", content.len());
             Ok(content)
         }
         Err(e) => Err(format!("Failed to read file: {}", e))
@@ -164,7 +148,7 @@ async fn main() {
         ])
         .setup(|app| {
             // Setup cleanup on app exit
-            let app_handle = app.handle().clone();
+            let _app_handle = app.handle().clone(); // Keep for potential future use
             
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Regular);

@@ -53,6 +53,8 @@ export function TTSPlayer({ initialText = '', initialVoice = 'nova' }: TTSPlayer
   const [voice, setVoice] = useState(initialVoice);
   const [isGenerating, setIsGenerating] = useState(false);
   const [audioSrc, setAudioSrc] = useState<string>('');
+  const [audioSrcs, setAudioSrcs] = useState<string[]>([]);
+  const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
   const [error, setError] = useState<string>('');
   const [showUsageStats, setShowUsageStats] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
@@ -96,6 +98,7 @@ export function TTSPlayer({ initialText = '', initialVoice = 'nova' }: TTSPlayer
       });
       
       setAudioSrc(audioPath);
+      setAudioSrcs([]);
       // Keep text for manual editing/regeneration instead of nuclear clear
     } catch (err) {
       const parsedError = parseError(err);
@@ -119,6 +122,7 @@ export function TTSPlayer({ initialText = '', initialVoice = 'nova' }: TTSPlayer
       });
       
       setAudioSrc(audioPath);
+      setAudioSrcs([]);
       // Keep text for manual editing/regeneration instead of nuclear clear
     } catch (err) {
       const parsedError = parseError(err);
@@ -129,6 +133,15 @@ export function TTSPlayer({ initialText = '', initialVoice = 'nova' }: TTSPlayer
   };
 
   const isGenerateDisabled = !text.trim() || isGenerating;
+  
+  // Handle playing next audio chunk
+  const handleChunkEnded = useCallback(() => {
+    if (audioSrcs.length > 0 && currentChunkIndex < audioSrcs.length - 1) {
+      const nextIndex = currentChunkIndex + 1;
+      setCurrentChunkIndex(nextIndex);
+      setAudioSrc(audioSrcs[nextIndex]);
+    }
+  }, [audioSrcs, currentChunkIndex]);
 
   return (
     <div className="space-y-8">
@@ -158,9 +171,17 @@ export function TTSPlayer({ initialText = '', initialVoice = 'nova' }: TTSPlayer
       {audioSrc && (
         <div className="mb-6 animate-fade-in">
           <CompactMediaPlayer 
-            audioSrc={audioSrc} 
+            audioSrc={audioSrc}
+            audioSrcs={audioSrcs}
+            currentChunkIndex={currentChunkIndex}
+            onChunkEnded={handleChunkEnded}
             autoplay={shouldAutoplay} 
           />
+          {audioSrcs.length > 1 && (
+            <div className="text-xs text-text-tertiary text-center mt-2">
+              Playing chunk {currentChunkIndex + 1} of {audioSrcs.length}
+            </div>
+          )}
         </div>
       )}
 

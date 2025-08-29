@@ -3,10 +3,19 @@ import { Play, Pause } from 'lucide-react';
 
 interface CompactMediaPlayerProps {
   audioSrc: string;
+  audioSrcs?: string[];
+  currentChunkIndex?: number;
+  onChunkEnded?: () => void;
   autoplay?: boolean;
 }
 
-export function CompactMediaPlayer({ audioSrc, autoplay = false }: CompactMediaPlayerProps) {
+export function CompactMediaPlayer({ 
+  audioSrc, 
+  audioSrcs = [], 
+  currentChunkIndex = 0,
+  onChunkEnded,
+  autoplay = false 
+}: CompactMediaPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const autoplayAttemptedRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -19,7 +28,13 @@ export function CompactMediaPlayer({ audioSrc, autoplay = false }: CompactMediaP
 
     const handleTimeUpdate = () => setCurrentTime(audio.currentTime);
     const handleDurationChange = () => setDuration(audio.duration);
-    const handleEnded = () => setIsPlaying(false);
+    const handleEnded = () => {
+      setIsPlaying(false);
+      // If we have multiple chunks and haven't played them all
+      if (audioSrcs.length > 0 && currentChunkIndex < audioSrcs.length - 1) {
+        onChunkEnded?.();
+      }
+    };
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
 

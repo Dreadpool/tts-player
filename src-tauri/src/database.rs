@@ -2,7 +2,7 @@ use sqlx::{sqlite::SqlitePool, Row};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
-use std::path::PathBuf;
+// use std::path::PathBuf; // Unused import
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct UsageRecord {
